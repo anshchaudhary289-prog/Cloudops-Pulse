@@ -1,0 +1,29 @@
+groups:
+  - name: cloudops-pulse-alerts
+    rules:
+      - alert: ServiceDown
+        expr: up{job="cloudops-pulse"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CloudOps Pulse scrape target is down"
+          description: "Prometheus has not been able to scrape the app for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: rate(cloudops_service_checks_down[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of failed upstream service checks"
+          description: "More than 0.5 failed checks per second over the last 5 minutes."
+
+      - alert: NoServicesRegistered
+        expr: cloudops_services_registered == 0
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "No services registered for monitoring"
+          description: "CloudOps Pulse has had zero registered services for 5 minutes."
