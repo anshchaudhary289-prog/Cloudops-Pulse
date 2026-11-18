@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudops-pulse
+  namespace: cloudops-pulse
+  labels:
+    app.kubernetes.io/name: cloudops-pulse
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cloudops-pulse
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

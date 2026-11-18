@@ -1,0 +1,64 @@
+# In-cluster Prometheus config for CloudOps Pulse.
+# Same scrape jobs and alert rules as monitoring/prometheus.yml and
+# monitoring/alerts.yml, except the app target is the Kubernetes Service
+# DNS name (cloudops-pulse:8000) instead of the compose service name (app:8000).
+# Mount this ConfigMap into your own Prometheus Deployment/StatefulSet
+# (not included here — bring your own Prometheus, or keep using
+# docker-compose for the local stack).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudops-pulse-prometheus
+  namespace: cloudops-pulse
+  labels:
+    app.kubernetes.io/name: cloudops-pulse
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - "/etc/prometheus/alerts.yml"
+
+    scrape_configs:
+      - job_name: "cloudops-pulse"
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["cloudops-pulse:8000"]
+            labels:
+              service: cloudops-pulse
+
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]
+  alerts.yml: |
+    groups:
+      - name: cloudops-pulse-alerts
+        rules:
+          - alert: ServiceDown
+            expr: up{job="cloudops-pulse"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "CloudOps Pulse scrape target is down"
+              description: "Prometheus has not been able to scrape the app for more than 1 minute."
+
+          - alert: HighErrorRate
+            expr: rate(cloudops_service_checks_down[5m]) > 0.5
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High rate of failed upstream service checks"
+              description: "More than 0.5 failed checks per second over the last 5 minutes."
+
+          - alert: NoServicesRegistered
+            expr: cloudops_services_registered == 0
+            for: 5m
+            labels:
+              severity: info
+            annotations:
+              summary: "No services registered for monitoring"
+              description: "CloudOps Pulse has had zero registered services for 5 minutes."
