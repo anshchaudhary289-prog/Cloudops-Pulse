@@ -34,6 +34,25 @@ def test_classify_latency():
     assert classify_latency(None) == "unknown"
 
 
+def test_classify_status_boundaries():
+    assert classify_status(399) == "up"
+    assert classify_status(400) == "down"
+
+
+def test_is_healthy_latency_threshold():
+    assert is_healthy(200, 5000) is True
+    assert is_healthy(200, 5000.01) is False
+    assert is_healthy(200, None) is True
+
+
+def test_build_result_error_with_status_code():
+    result = build_check_result("api", "https://example.com", 500, 100.0, error="Server Error")
+    assert result["status"] == "down"
+    assert result["healthy"] is False
+    assert result["error"] == "Server Error"
+    assert result["status_code"] == 500
+
+
 def test_is_healthy_and_build_result():
     assert is_healthy(200, 100) is True
     assert is_healthy(500, 100) is False

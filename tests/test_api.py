@@ -1,9 +1,49 @@
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, check_history, services
 
 client = TestClient(app)
+
+
+class _StatusHandler(BaseHTTPRequestHandler):
+    """Serves a fixed status code; the code is set per test via the class attr."""
+
+    status_code = 200
+
+    def do_GET(self):
+        self.send_response(self.status_code)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args):
+        pass
+
+
+@contextmanager
+def local_server(status_code: int):
+    """Run a tiny HTTP server on an ephemeral localhost port."""
+    _StatusHandler.status_code = status_code
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _StatusHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def _metric_value(text: str, name: str) -> float:
+    for line in text.splitlines():
+        if line.startswith(name + " ") or line.startswith(name + "{"):
+            return float(line.rsplit(" ", 1)[1])
+    raise AssertionError(f"metric {name} not found in /metrics output")
 
 
 @pytest.fixture(autouse=True)
@@ -91,3 +131,50 @@ def test_check_unreachable_service_is_graceful():
     assert data["status"] == "down"
     assert data["healthy"] is False
     assert data["latency_ms"] is not None
+
+
+def test_check_up_service_updates_last_status_and_uptime():
+    with local_server(200) as url:
+        client.post("/api/services", json={"name": "upsvc", "url": url})
+        resp = client.get("/api/services/upsvc/check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "up"
+    assert data["status_code"] == 200
+    assert data["healthy"] is True
+    assert data["latency_class"] in ("fast", "slow", "critical")
+    assert data["uptime_percent"] == 100.0
+
+    got = client.get("/api/services/upsvc")
+    assert got.json()["last_status"] == "up"
+    assert got.json()["uptime_percent"] == 100.0
+
+
+def test_check_http_error_response_is_down():
+    # An HTTP 500 is still a response (urllib HTTPError branch), not a crash.
+    with local_server(500) as url:
+        client.post("/api/services", json={"name": "errsvc", "url": url})
+        resp = client.get("/api/services/errsvc/check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "down"
+    assert data["status_code"] == 500
+    assert data["healthy"] is False
+    assert data["error"] is None
+
+    got = client.get("/api/services/errsvc")
+    assert got.json()["last_status"] == "down"
+    assert got.json()["uptime_percent"] == 0.0
+
+
+def test_metrics_reflect_registered_services_and_checks():
+    with local_server(200) as url:
+        client.post("/api/services", json={"name": "metricsvc", "url": url})
+        text = client.get("/metrics").text
+        assert _metric_value(text, "cloudops_services_registered") == 1
+        assert 'cloudops_app_info{version="1.0.0"} 1' in text
+
+        before = _metric_value(text, "cloudops_service_checks_total")
+        client.get("/api/services/metricsvc/check")
+        after = _metric_value(client.get("/metrics").text, "cloudops_service_checks_total")
+    assert after == before + 1
