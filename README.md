@@ -20,7 +20,7 @@ Register any HTTP service, check it on demand, and get status, latency and uptim
 - **Real health checks** — performs an actual HTTP request (3-second timeout), measures latency, classifies up/down, and handles unreachable services gracefully instead of crashing
 - **Uptime tracking** — keeps check history per service and calculates uptime %
 - **Prometheus metrics** — `/metrics` in Prometheus text format, implemented manually (no extra library) so the format is understood, not just imported
-- **Production packaging** — multi-stage Dockerfile (non-root user, `HEALTHCHECK`), docker-compose stack with Prometheus, GitHub Actions CI, manual GHCR deploy, and Terraform for AWS EC2 + S3
+- **Production packaging** — multi-stage Dockerfile (non-root user, `HEALTHCHECK`), docker-compose stack with Prometheus, GitHub Actions CI, manual GHCR deploy, Terraform for AWS EC2 + S3, Kubernetes manifests (`k8s/`), and a Grafana dashboard (`monitoring/grafana-dashboard.json`)
 
 ## Architecture
 
@@ -110,6 +110,8 @@ curl http://localhost:8000/metrics
 | `DELETE` | `/api/services/{name}` | Remove a service (204) |
 | `GET` | `/api/services/{name}/check` | Real HTTP check — status, status code, latency, uptime % |
 
+Full reference with request/response examples and error codes: [`docs/API.md`](docs/API.md).
+
 ## CI/CD flow
 
 - **CI** (`.github/workflows/ci.yml`) — on every push and pull request to `main`:
@@ -131,7 +133,7 @@ terraform output app_url
 # -> http://<public-ip>:8000
 ```
 
-> Requires AWS credentials configured locally (for example via `aws configure`). Default region is `ap-south-1` and the default instance type is the free-tier-friendly `t2.micro` — see `terraform/variables.tf`. Run `terraform destroy` when done to avoid charges. See also the design notes in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+> Requires AWS credentials configured locally (for example via `aws configure`). Default region is `ap-south-1` and the default instance type is the free-tier-friendly `t2.micro` — see `terraform/variables.tf`. Run `terraform destroy` when done to avoid charges. See also the step-by-step guide in [`docs/terraform.md`](docs/terraform.md) and the design notes in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Project structure
 
@@ -140,10 +142,12 @@ cloudops-pulse/
 ├── app/
 │   ├── main.py            # FastAPI app, routes, metrics, real HTTP checks
 │   └── checker.py         # Pure classification / latency / uptime logic
-├── tests/                 # pytest — API tests + checker unit tests
+├── tests/                 # pytest — API tests + checker unit tests (20 tests)
 ├── monitoring/
 │   ├── prometheus.yml     # Scrape config
-│   └── alerts.yml         # ServiceDown / HighErrorRate rules
+│   ├── alerts.yml         # ServiceDown / HighErrorRate rules
+│   └── grafana-dashboard.json  # 7-panel Grafana dashboard
+├── k8s/                   # Namespace, Deployment (2 replicas), Service, Prometheus ConfigMap
 ├── .github/workflows/
 │   ├── ci.yml             # Test + lint + Docker build on push/PR
 │   └── deploy.yml         # Manual: build & push to GHCR (+ optional SSH)
@@ -152,9 +156,14 @@ cloudops-pulse/
 │   ├── deploy.sh          # docker compose pull/up + health wait
 │   ├── health-check.sh    # curl /health with retries
 │   └── user_data.sh       # EC2 bootstrap: install Docker, run container
-├── docs/ARCHITECTURE.md   # Design decisions and trade-offs
+├── docs/
+│   ├── ARCHITECTURE.md    # Design decisions and trade-offs
+│   ├── API.md             # Full API reference with examples and errors
+│   └── terraform.md       # Terraform deployment guide for AWS
+├── CHANGELOG.md           # Release history (Keep a Changelog format)
 ├── Dockerfile             # Multi-stage, non-root, HEALTHCHECK
 ├── docker-compose.yml     # App + Prometheus
+├── .env.example           # Example environment variables
 ├── pyproject.toml       # Project metadata, Ruff + pytest config
 ├── requirements.txt
 └── requirements-dev.txt
